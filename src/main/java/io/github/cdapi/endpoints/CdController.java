@@ -57,7 +57,7 @@ public class CdController {
                         inputPath, Arrays.toString(DatasetEnum.values())));
             }
 
-            inputPath = String.format("src/main/resources/datasets/%s.csv", datasetEnum.name().toLowerCase(Locale.ROOT));
+            inputPath = String.format("data/%s.csv", datasetEnum.name().toLowerCase(Locale.ROOT));
         }
 
 //        Parse the maxPLeft and maxPRight parameters

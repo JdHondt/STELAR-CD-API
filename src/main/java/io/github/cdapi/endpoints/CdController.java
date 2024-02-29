@@ -1,4 +1,4 @@
-package io.github.cdapi;
+package io.github.cdapi.endpoints;
 
 import _aux.lib;
 import algorithms.performance.CorrelationDetective;
@@ -6,6 +6,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import core.RunParameters;
+import io.github.cdapi.enums.DatasetEnum;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import netscape.javascript.JSObject;
@@ -17,6 +18,7 @@ import queries.ResultSet;
 import similarities.SimEnum;
 
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,7 +27,6 @@ import java.util.logging.Logger;
 @RequestMapping("/cd")
 @Api(value = "Correlation Detective API", description = "Main API for running Correlation Detective jobs")
 public class CdController {
-
 
     @PostMapping("/run")
     @ApiOperation(value = "Run a Correlation Detective job", response = String.class)
@@ -36,20 +37,42 @@ public class CdController {
             @RequestParam(value = "maxPRight") String maxPRightTmp,
             @RequestBody Map<String, String> payLoad
     ){
+
 //        Process the request parameters
         int maxPLeft;
         int maxPRight;
         SimEnum simEnum;
+//        Parse the inputPath parameter
+        if (inputPath.startsWith("http://") || inputPath.startsWith("https://")){
+//            Check if a dataToken is passed in the payload
+            if (!payLoad.containsKey("dataToken")){
+                return ResponseEntity.badRequest().body("When using a URL as inputPath, a dataToken must be passed in the payload");
+            }
+        } else { // If not an external URL, path needs to be one of the example datasets
+            DatasetEnum datasetEnum;
+            try {
+                datasetEnum = DatasetEnum.valueOf(inputPath.toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e){
+                return ResponseEntity.badRequest().body(String.format("Unsupported inputPath: %s, please choose any of: %s",
+                        inputPath, Arrays.toString(DatasetEnum.values())));
+            }
+
+            inputPath = String.format("src/main/resources/datasets/%s.csv", datasetEnum.name().toLowerCase(Locale.ROOT));
+        }
+
+//        Parse the maxPLeft and maxPRight parameters
         try {
             maxPLeft = Integer.parseInt(maxPLeftTmp);
             maxPRight = Integer.parseInt(maxPRightTmp);
         } catch (NumberFormatException e){
             return ResponseEntity.badRequest().body("maxPLeft and maxPRight must be integers");
         }
+
+//        Parse the simMetricName parameter
         try{
             simEnum = SimEnum.valueOf(simMetricName);
         } catch (IllegalArgumentException e){
-            return ResponseEntity.badRequest().body(String.format("Unsupported simMetricName: %s, please choose any of: %s",
+            return ResponseEntity.badRequest().body(String.format("Unsupported simMetricName: %s, please choose any of: %s, or provide a minio URL",
                     simMetricName, Arrays.toString(SimEnum.values())));
         }
 
@@ -74,7 +97,6 @@ public class CdController {
 
 //        Remove all current global logger handlers
         Arrays.stream(Logger.getGlobal().getHandlers()).forEach(Logger.getGlobal()::removeHandler);
-
 
 //        Run the query
         CorrelationDetective cd = new CorrelationDetective(runParameters);

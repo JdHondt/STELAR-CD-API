@@ -100,7 +100,11 @@ public class CdController {
 
 //        Run the query
         CorrelationDetective cd = new CorrelationDetective(runParameters);
-        cd.run();
+        try{
+            cd.run();
+        } catch (Exception e){
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
 
 //        Prepare the response
         Gson gson = new Gson();

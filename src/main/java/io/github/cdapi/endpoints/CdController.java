@@ -31,14 +31,20 @@ public class CdController {
     @PostMapping("/run")
     @ApiOperation(value = "Run a Correlation Detective job", response = String.class)
     public ResponseEntity runCdJob(
-            @RequestParam(value = "inputPath") String inputPath,
-            @RequestParam(value = "simMetricName") String simMetricName,
-            @RequestParam(value = "maxPLeft") String maxPLeftTmp,
-            @RequestParam(value = "maxPRight") String maxPRightTmp,
             @RequestBody Map<String, String> payLoad
     ){
 
-//        Process the request parameters
+//      Process the required parameters
+//      Check if the required parameters are present
+        if (!payLoad.containsKey("inputPath") || !payLoad.containsKey("maxPLeft") || !payLoad.containsKey("maxPRight") || !payLoad.containsKey("simMetric")){
+            return ResponseEntity.badRequest().body("inputPath, maxPLeft, maxPRight, and simMetric are required parameters");
+        }
+
+//        Get the required parameters
+        String inputPath = payLoad.remove("inputPath");
+        String maxPLeftTmp = payLoad.remove("maxPLeft");
+        String maxPRightTmp = payLoad.remove("maxPRight");
+        String simMetricName = payLoad.remove("simMetric");
         int maxPLeft;
         int maxPRight;
         SimEnum simEnum;
@@ -59,7 +65,6 @@ public class CdController {
 
             inputPath = String.format("data/%s.csv", datasetEnum.name().toLowerCase(Locale.ROOT));
         }
-
 //        Parse the maxPLeft and maxPRight parameters
         try {
             maxPLeft = Integer.parseInt(maxPLeftTmp);
@@ -67,7 +72,6 @@ public class CdController {
         } catch (NumberFormatException e){
             return ResponseEntity.badRequest().body("maxPLeft and maxPRight must be integers");
         }
-
 //        Parse the simMetricName parameter
         try{
             simEnum = SimEnum.valueOf(simMetricName);

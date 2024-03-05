@@ -6,6 +6,8 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import core.RunParameters;
+import core.StatBag;
+import data_io.DataHandler;
 import io.github.cdapi.enums.DatasetEnum;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -20,6 +22,7 @@ import similarities.SimEnum;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -29,66 +32,83 @@ import java.util.logging.Logger;
 public class CdController {
 
     @PostMapping("/run")
-    @ApiOperation(value = "Run a Correlation Detective job", response = String.class)
+    @ApiOperation(value = "Run a Correlation Detective job", response = UUID.class)
     public ResponseEntity runCdJob(
             @RequestBody Map<String, String> payLoad
     ){
+        String[] requiredParams = new String[]{
+                "inputPath",
+                "outputPath",
+                "maxPLeft",
+                "maxPRight",
+                "simMetric",
+                "MINIO_ENDPOINT_URL",
+                "MINIO_ACCESS_KEY",
+                "MINIO_SECRET_KEY"
+        };
 
-//      Process the required parameters
-//      Check if the required parameters are present
-        if (!payLoad.containsKey("inputPath") || !payLoad.containsKey("maxPLeft") || !payLoad.containsKey("maxPRight") || !payLoad.containsKey("simMetric")){
-            return ResponseEntity.badRequest().body("inputPath, maxPLeft, maxPRight, and simMetric are required parameters");
+
+//      0. Check if the required parameters are present
+        for (String param : requiredParams){
+            if (!payLoad.containsKey(param)){
+                return ResponseEntity.badRequest().body(String.format("Missing required parameter: %s", param));
+            }
         }
 
-//        Get the required parameters
+//        Generate a random runId
+        UUID runId = UUID.randomUUID();
+
+
+//      1. Get the required parameters
+//        1.1 Set MINIO credentials
+        System.setProperty("MINIO_ENDPOINT_URL", payLoad.remove("MINIO_ENDPOINT_URL"));
+        System.setProperty("MINIO_ACCESS_KEY", payLoad.remove("MINIO_ACCESS_KEY"));
+        System.setProperty("MINIO_SECRET_KEY", payLoad.remove("MINIO_SECRET_KEY"));
+
+//        1.2 Input and output paths
         String inputPath = payLoad.remove("inputPath");
+        String outputPath = payLoad.remove("outputPath");
+//        Parse the inputPath and output parameter
+        if (!inputPath.startsWith("s3://")){
+            return ResponseEntity.badRequest().body("inputPath must be a Minio URL");
+        }
+        if (!outputPath.startsWith("s3://")){
+            return ResponseEntity.badRequest().body("outputPath must be a Minio URL");
+        }
+        outputPath += "/" + runId;
+
+//        1.3 maxPLeft and maxPRight
         String maxPLeftTmp = payLoad.remove("maxPLeft");
         String maxPRightTmp = payLoad.remove("maxPRight");
-        String simMetricName = payLoad.remove("simMetric");
         int maxPLeft;
         int maxPRight;
-        SimEnum simEnum;
-//        Parse the inputPath parameter
-        if (inputPath.startsWith("http://") || inputPath.startsWith("https://")){
-//            Check if a dataToken is passed in the payload
-            if (!payLoad.containsKey("dataToken")){
-                return ResponseEntity.badRequest().body("When using a URL as inputPath, a dataToken must be passed in the payload");
-            }
-        } else { // If not an external URL, path needs to be one of the example datasets
-            DatasetEnum datasetEnum;
-            try {
-                datasetEnum = DatasetEnum.valueOf(inputPath.toUpperCase(Locale.ROOT));
-            } catch (IllegalArgumentException e){
-                return ResponseEntity.badRequest().body(String.format("Unsupported inputPath: %s, please choose any of: %s",
-                        inputPath, Arrays.toString(DatasetEnum.values())));
-            }
-
-            inputPath = String.format("data/%s.csv", datasetEnum.name().toLowerCase(Locale.ROOT));
-        }
-//        Parse the maxPLeft and maxPRight parameters
         try {
             maxPLeft = Integer.parseInt(maxPLeftTmp);
             maxPRight = Integer.parseInt(maxPRightTmp);
-        } catch (NumberFormatException e){
+        } catch (NumberFormatException e) {
             return ResponseEntity.badRequest().body("maxPLeft and maxPRight must be integers");
         }
-//        Parse the simMetricName parameter
-        try{
+
+//        1.4 simMetricName
+        String simMetricName = payLoad.remove("simMetric");
+        SimEnum simEnum;
+        try {
             simEnum = SimEnum.valueOf(simMetricName);
-        } catch (IllegalArgumentException e){
-            return ResponseEntity.badRequest().body(String.format("Unsupported simMetricName: %s, please choose any of: %s, or provide a minio URL",
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(String.format("Unsupported simMetricName: %s, please choose any of: %s",
                     simMetricName, Arrays.toString(SimEnum.values())));
         }
 
-//        Create a RunParameters object
+//        2. Create a RunParameters object
         RunParameters runParameters = new RunParameters(inputPath, simEnum, maxPLeft, maxPRight);
+        runParameters.setOutputPath(outputPath);
 
 //        Set some default parameters
         runParameters.setQueryType(QueryTypeEnum.TOPK);
         runParameters.setParallel(false);
 //        runParameters.setLogLevel(Level.WARNING);
 
-//        Parse the rest of the parameters in the payload, and set them in the RunParameters object
+//        3. Parse the rest of the parameters in the payload, and set them in the RunParameters object
         for (Map.Entry<String, String> entry : payLoad.entrySet()){
             try{
 //                Try to parse the value
@@ -102,7 +122,7 @@ public class CdController {
 //        Remove all current global logger handlers
         Arrays.stream(Logger.getGlobal().getHandlers()).forEach(Logger.getGlobal()::removeHandler);
 
-//        Run the query
+//        4. Run the query
         CorrelationDetective cd = new CorrelationDetective(runParameters);
         try{
             cd.run();
@@ -110,18 +130,30 @@ public class CdController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
 
-//        Prepare the response
-        Gson gson = new Gson();
-        JsonElement runParametersJsonElement = runParameters.toJsonElement();
-        JsonElement statBagJsonElement = runParameters.getStatBag().toJsonElement();
-        JsonElement resultSetJsonElement = runParameters.getResultSet().toJsonElement(gson);
+//        5. Save the results and stats
+        saveResults(runParameters, outputPath);
 
-//        Combine the three json elements into one
-        JsonObject response = new JsonObject();
-        response.add("run_parameters", runParametersJsonElement);
-        response.add("run_statistics", statBagJsonElement);
-        response.add("results", resultSetJsonElement);
+//        6. Return the output path to the user
+        return ResponseEntity.ok(outputPath);
+    }
 
-        return new ResponseEntity<>(response.toString(), HttpStatus.OK);
+    private static void saveResults(RunParameters runParameters, String outputPath){
+        Logger.getGlobal().info("Saving results and stats to " + outputPath);
+
+        //        Create the output directory
+        lib.createDir(outputPath);
+
+        DataHandler outputHandler = runParameters.getOutputHandler();
+        StatBag statBag = runParameters.getStatBag();
+        ResultSet resultSet = runParameters.getResultSet();
+
+//        Save the parameters as a json file
+        outputHandler.writeToFile(outputPath + "/parameters.json", runParameters.toJson());
+
+//        Save the statBag as a json file
+        outputHandler.writeToFile(outputPath + "/stats.json", statBag.toJson());
+
+//        Save the results as a json file
+        outputHandler.writeToFile(outputPath + "/results.json", resultSet.toJson());
     }
 }

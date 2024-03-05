@@ -57,3 +57,9 @@ response = requests.request("POST", url, headers=headers, data=payload)
 
 print(response.text)
 ```
+
+# Output
+The output will be a String containing the path to the output file in the object storage bucket. For example:
+```json
+"s3://correlation-detective/2e318677-a9fd-4e07-b172-dd725c0b78f4"
+```

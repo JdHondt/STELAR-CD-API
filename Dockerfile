@@ -1,4 +1,4 @@
-FROM openjdk:17-jdk-alpine
+FROM alexdarancio7/pyvis-custom:latest
 MAINTAINER "Jens d'Hondt"
 
 # Copy jar

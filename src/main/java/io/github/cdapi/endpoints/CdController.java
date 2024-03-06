@@ -12,6 +12,7 @@ import io.github.cdapi.enums.DatasetEnum;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import netscape.javascript.JSObject;
+import org.springframework.boot.logging.LoggerGroup;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,10 +20,10 @@ import queries.QueryTypeEnum;
 import queries.ResultSet;
 import similarities.SimEnum;
 
-import java.util.Arrays;
-import java.util.Locale;
-import java.util.Map;
-import java.util.UUID;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.*;
+import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -57,7 +58,6 @@ public class CdController {
 
 //        Generate a random runId
         UUID runId = UUID.randomUUID();
-
 
 //      1. Get the required parameters
 //        1.1 Set MINIO credentials
@@ -131,13 +131,18 @@ public class CdController {
         }
 
 //        5. Save the results and stats
-        saveResults(runParameters, outputPath);
+        saveResults(runParameters);
+
+//        6. Create graph visualization of results
+        generateGraphViz(runParameters, runId);
 
 //        6. Return the output path to the user
         return ResponseEntity.ok(outputPath);
     }
 
-    private static void saveResults(RunParameters runParameters, String outputPath){
+    private static void saveResults(RunParameters runParameters){
+        String outputPath = runParameters.getOutputPath();
+
         Logger.getGlobal().info("Saving results and stats to " + outputPath);
 
         //        Create the output directory
@@ -155,5 +160,60 @@ public class CdController {
 
 //        Save the results as a json file
         outputHandler.writeToFile(outputPath + "/results.json", resultSet.toJson());
+    }
+
+    private static void saveAllResults(RunParameters runParameters, String outputPath) {
+        //        Prepare the response
+        Gson gson = new Gson();
+        JsonElement runParametersJsonElement = runParameters.toJsonElement();
+        JsonElement statBagJsonElement = runParameters.getStatBag().toJsonElement();
+        JsonElement resultSetJsonElement = runParameters.getResultSet().toJsonElement(gson);
+
+//        Combine the three json elements into one
+        JsonObject response = new JsonObject();
+        response.add("run_parameters", runParametersJsonElement);
+        response.add("run_statistics", statBagJsonElement);
+        response.add("results", resultSetJsonElement);
+
+        //        Save the response as a json file
+        data_io.FileHandler fileHandler = new data_io.FileHandler();
+        fileHandler.writeToFile(outputPath, response.toString());
+    }
+
+    private static void generateGraphViz(RunParameters runParameters, UUID runId){
+        Logger.getGlobal().info("Generating graph visualization of results");
+
+//        Temporarily save the results as a json file
+        String tmpJsonPath = "/tmp/" + runId + ".json";
+        saveAllResults(runParameters, tmpJsonPath);
+
+//        Generate the graph visualization by calling the python script
+        String tmpHtmlPath = "/tmp/" + runId + ".html";
+        String[] cmd = new String[]{
+                "python3",
+                "gvis.py",
+                tmpJsonPath,
+                "-o",
+                tmpHtmlPath
+        };
+
+        Logger.getGlobal().info("Running command: " + String.join(" ", cmd));
+
+//        Call python script, wait for it to finish, and print the output
+        try {
+            Process p = Runtime.getRuntime().exec(cmd);
+            p.waitFor();
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        }
+
+//        Move the output to the correct location
+        try{
+            DataHandler outputHandler = runParameters.getOutputHandler();
+            String html = Files.readString(java.nio.file.Path.of(tmpHtmlPath));
+            outputHandler.writeToFile(runParameters.getOutputPath() + "/visualization.html", html);
+        } catch (IOException e){
+            e.printStackTrace();
+        }
     }
 }

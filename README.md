@@ -9,13 +9,13 @@ docker pull correlationdetective/stelar-api:latest
 
 ## Step 2: Run the image
 ```bash
-docker run -p8080:8080 --network='host' correlationdetective/stelar-api:latest
+docker run -p8090:8090 --network='host' correlationdetective/stelar-api:latest
 ```
 
 # How to query
 Example query:
 ```bash
-curl --location --request POST 'http://localhost:8080/cd/run' \
+curl --location --request POST 'http://localhost:8090/cd/run' \
 --header 'Content-Type: application/json' \
 --data-raw '{
     "inputPath": "s3://correlation-detective/example_data.csv",
@@ -35,7 +35,7 @@ or in Python:
 import requests
 import json
 
-url = "http://localhost:8080/cd/run"
+url = "http://localhost:8090/cd/run"
 
 payload = json.dumps({
   "inputPath": "s3://correlation-detective/example_data.csv",
